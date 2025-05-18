@@ -13,7 +13,10 @@
     "bitcoin-core": "^5.0.0",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "fs": "^0.0.1-security",
+    "qrcode": "^1.5.4"
   },
   "description": ""
 }

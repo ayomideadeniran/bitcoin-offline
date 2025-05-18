@@ -1,8 +1,12 @@
 const express = require('express');
 const axios = require('axios');
+const fs = require('fs');
+const QRCode = require('qrcode');
+const cors = require('cors');
 
 const app = express();
 app.use(express.json());
+app.use(cors()); // Allow requests from your React frontend
 
 const client = axios.create({
   baseURL: 'http://127.0.0.1:18443',
@@ -35,11 +39,10 @@ app.post('/create-wallet', async (req, res) => {
   }
 });
 
-// Generate new address from a wallet
+// Generate address
 app.get('/generate-address/:wallet', async (req, res) => {
-  const wallet = req.params.wallet;
   try {
-    const address = await callRpc('getnewaddress', [], wallet);
+    const address = await callRpc('getnewaddress', [], req.params.wallet);
     res.json({ address });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -48,9 +51,8 @@ app.get('/generate-address/:wallet', async (req, res) => {
 
 // Get balance
 app.get('/get-balance/:wallet', async (req, res) => {
-  const wallet = req.params.wallet;
   try {
-    const balance = await callRpc('getbalance', [], wallet);
+    const balance = await callRpc('getbalance', [], req.params.wallet);
     res.json({ balance });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -59,16 +61,15 @@ app.get('/get-balance/:wallet', async (req, res) => {
 
 // List transactions
 app.get('/list-tx/:wallet', async (req, res) => {
-  const wallet = req.params.wallet;
   try {
-    const txs = await callRpc('listtransactions', [], wallet);
+    const txs = await callRpc('listtransactions', [], req.params.wallet);
     res.json({ transactions: txs });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Send BTC from a wallet to an address
+// Send coins
 app.post('/send-to-address', async (req, res) => {
   const { walletName, address, amount } = req.body;
   if (!walletName || !address || !amount) {
@@ -82,13 +83,19 @@ app.post('/send-to-address', async (req, res) => {
   }
 });
 
-
-// Create PSBT transaction
+// Create PSBT, save to file, and generate QR
 app.post('/create-tx', async (req, res) => {
   const { walletName, outputs } = req.body;
   try {
-    const psbt = await callRpc('walletcreatefundedpsbt', [[], outputs], walletName);
-    res.json({ psbt });
+    const { psbt } = await callRpc('walletcreatefundedpsbt', [[], outputs], walletName);
+
+    const filename = `./psbts/${walletName}_${Date.now()}.psbt`;
+    fs.mkdirSync('./psbts', { recursive: true });
+    fs.writeFileSync(filename, psbt);
+
+    const qrCode = await QRCode.toDataURL(psbt);
+
+    res.json({ psbt, qrCode, file: filename });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -105,7 +112,24 @@ app.post('/sign-tx', async (req, res) => {
   }
 });
 
-// Finalize and broadcast
+// // Finalize and broadcast PSBT
+// app.post('/broadcast-tx', async (req, res) => {
+//   const { psbt } = req.body;
+//   try {
+//     const finalized = await callRpc('finalizepsbt', [psbt]);
+//     if (finalized.complete) {
+//       const txid = await callRpc('sendrawtransaction', [finalized.hex]);
+//       res.json({ txid });
+//     } else {
+//       res.status(400).json({ error: 'PSBT not complete' });
+//     }
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
+
+
+
 app.post('/broadcast-tx', async (req, res) => {
   const { psbt } = req.body;
   try {
@@ -117,43 +141,21 @@ app.post('/broadcast-tx', async (req, res) => {
       res.status(400).json({ error: 'PSBT not complete' });
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // Log the full error response from Bitcoin Core
+    if (err.response && err.response.data) {
+      console.error('Broadcast error (Bitcoin Core):', JSON.stringify(err.response.data, null, 2));
+      res.status(500).json({ error: err.response.data.error?.message || 'Unknown Bitcoin Core error' });
+    } else {
+      console.error('Broadcast error (other):', err);
+      res.status(500).json({ error: err.message });
+    }
   }
 });
 
+
+
+
 const PORT = 3001;
 app.listen(PORT, () => {
-  console.log(`Bitcoin backend running on http://localhost:${PORT}`);
+  console.log(`Bitcoin backend running at http://localhost:${PORT}`);
 });
-
-
-
-
-
-// This are the command i have
-
-// LOAD WALLET
-//  bitcoin-cli -regtest listwallets
-
-
-
-// CREATE WALLET
-// bitcoin-cli -regtest createwallet anyone
-
-
-// GETNEWADDRESS
-// bitcoin-cli -regtest -rpcwallet=anyone getnewaddress
-
-
-// GETBALANCE
-// bitcoin-cli -regtest -rpcwallet=anyone getbalance
-
-
-// MINE COINS
-// bitcoin-cli -regtest generatetoaddress 101 bcrt1qp4hwhnk8pclgjrmn3t37s45e2qvxlkq28qpvvp
-
-
-// SEND COINS
-// curl -X POST http://localhost:3001/send-to-address -H "Content-Type: application/json" -d '{"walletName":"oyin","address":"bcrt1qp4hwhnk8pclgjrmn3t37s45e2qvxlkq28qpvvp","amount":0.5}'
-
-
